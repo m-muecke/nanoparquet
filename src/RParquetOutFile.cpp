@@ -3029,7 +3029,7 @@ void RParquetOutFile::init_metadata(
     if (!write_minmax_values || sels.elements.size() != 1) {
       // nothing to do
       // no min/max for nested types
-    } if (sels.element().__isset.logicalType) {
+    } else if (sels.element().__isset.logicalType) {
       parquet::LogicalType &lt = sels.element().logicalType;
       is_minmax_supported[idx] = lt.__isset.DATE || lt.__isset.INTEGER ||
         lt.__isset.TIME || lt.__isset.STRING || lt.__isset.ENUM ||
@@ -3111,7 +3111,7 @@ void RParquetOutFile::init_append_metadata(
     // TODO: DRY
     if (!write_minmax_values) {
       // nothing to do
-    } if (sel.__isset.logicalType) {
+    } else if (sel.__isset.logicalType) {
       parquet::LogicalType &lt = sel.logicalType;
       is_minmax_supported[idx] = lt.__isset.DATE || lt.__isset.INTEGER ||
         lt.__isset.TIME || lt.__isset.STRING || lt.__isset.ENUM ||
