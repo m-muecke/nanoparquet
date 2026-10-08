@@ -4,6 +4,8 @@
 
 * `write_parquet()` no longer fails on `bit64::integer64` columns with missing values.
 
+* `write_parquet()` now errors when a value does not fit the Parquet integer type, e.g. a negative value in an unsigned column, for integer columns and for dictionary encoding as well. Previously these values were written without a check, and other readers saw different values.
+
 * `write_parquet()` now writes correct min/max statistics for numeric columns that span multiple pages.
 
 * `write_parquet()` now uses ZSTD compression level 3 by default, as documented.

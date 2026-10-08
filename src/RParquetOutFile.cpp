@@ -593,7 +593,7 @@ void RParquetOutFile::write_integer_int32(std::ostream &file, SEXP col,
     has_min = has_max = true;
   }
 
-  if (bit_width == 32) {
+  if (bit_width == 32 && is_signed) {
     if (!minmax &&
         sel.repetition_type == parquet::FieldRepetitionType::REQUIRED) {
       uint64_t len = until - from;
@@ -619,6 +619,9 @@ void RParquetOutFile::write_integer_int32(std::ostream &file, SEXP col,
       max = is_signed ? 127 : 255;
     } else if (bit_width == 16) {
       max = is_signed ? 256 * 128 - 1 : 256 * 256 - 1;
+    } else if (bit_width == 32) {
+      // unsigned, any non-negative R integer fits
+      max = 0x7fffffff;
     } else {
       r_call([&] {
         Rf_errorcall(
@@ -996,7 +999,12 @@ void write_integer_int64_dec(std::ostream &file, SEXP col, uint64_t from,
 
 void RParquetOutFile::write_integer_int64(std::ostream &file, SEXP col,
                                           uint32_t idx,
-                                          uint64_t from, uint64_t until) {
+                                          uint64_t from, uint64_t until,
+                                          parquet::SchemaElement &sel) {
+  bool is_signed = TRUE;
+  if (sel.__isset.logicalType && sel.logicalType.__isset.INTEGER) {
+    is_signed = sel.logicalType.INTEGER.isSigned;
+  }
 
   int64_t min_value = 0, max_value = 0;
   bool has_min = false, has_max = false;
@@ -1010,6 +1018,16 @@ void RParquetOutFile::write_integer_int64(std::ostream &file, SEXP col,
   for (uint64_t i = from; i < until; i++) {
     int32_t val = INTEGER(col)[i];
     if (val == NA_INTEGER) continue;
+    if (!is_signed && val < 0) {
+      r_call([&] {
+        Rf_errorcall(
+          nanoparquet_call,
+          "Integer value too small for UINT with bit width 64: %d"
+          " at column %u, row %" PRIu64 ".",
+          val, idx + 1, i + 1
+        );
+      });
+    }
     int64_t el = val;
     if (minmax && (!has_min || el < min_value)) {
       has_min = true;
@@ -1290,7 +1308,7 @@ void RParquetOutFile::write_int64(std::ostream &file, uint32_t idx,
     if (isdec) {
       write_integer_int64_dec(file, col, from, until, precision, scale);
     } else {
-      write_integer_int64(file, col, idx, from, until);
+      write_integer_int64(file, col, idx, from, until, sel);
     }
     break;
   case REALSXP:
@@ -2341,10 +2359,46 @@ void RParquetOutFile::write_dictionary(
           file.write((const char*) idict, sizeof(int32_t) * len);
           UNPROTECT(1);
         } else {
+          bool is_signed = TRUE;
+          int bit_width = 32;
+          if (sel.__isset.logicalType && sel.logicalType.__isset.INTEGER) {
+            is_signed = sel.logicalType.INTEGER.isSigned;
+            bit_width = sel.logicalType.INTEGER.bitWidth;
+          }
+          int32_t min, max = 0;
+          switch (bit_width) {
+          case 8:
+            max = is_signed ? 0x7f : 0xff;
+            break;
+          case 16:
+            max = is_signed ? 0x7fff : 0xffff;
+            break;
+          case 32:
+            // for unsigned, any non-negative R integer fits
+            max = 0x7fffffff;
+            break;
+          default:
+            r_call([&] {
+              Rf_errorcall(nanoparquet_call, "Invalid bit width for INT32: %d",
+                          bit_width);
+            });
+          }
+          min = is_signed ? -max - 1 : 0;
           SEXP dict = PROTECT(Rf_allocVector(INTSXP, len));
           int *idict = INTEGER(dict);
           for (auto i = 0; i < len; i++) {
-            idict[i] = icol[iidx[i]];
+            int32_t val = icol[iidx[i]];
+            const char *w = val < min ? "small" : (val > max ? "large" : "");
+            if (w[0]) {
+              r_call([&] {
+                Rf_errorcall(
+                    nanoparquet_call,
+                    "Integer value too %s for %sINT with bit width %d: %d"
+                    " at column %u.",
+                    w, (is_signed ? "" : "U"), bit_width, val, idx + 1);
+              });
+            }
+            idict[i] = val;
           }
           file.write((const char*) idict, sizeof(int) * len);
           UNPROTECT(1);
@@ -2383,10 +2437,24 @@ void RParquetOutFile::write_dictionary(
           file.write((const char*) idict, sizeof(int64_t) * len);
           UNPROTECT(1);
         } else {
+          bool is_signed = TRUE;
+          if (sel.__isset.logicalType && sel.logicalType.__isset.INTEGER) {
+            is_signed = sel.logicalType.INTEGER.isSigned;
+          }
           SEXP dict = PROTECT(Rf_allocVector(REALSXP, len));
           int64_t *idict = (int64_t*) REAL(dict);
           for (auto i = 0; i < len; i++) {
-            idict[i] = icol[iidx[i]];
+            int32_t val = icol[iidx[i]];
+            if (!is_signed && val < 0) {
+              r_call([&] {
+                Rf_errorcall(
+                    nanoparquet_call,
+                    "Integer value too small for UINT with bit width 64: %d"
+                    " at column %u.",
+                    val, idx + 1);
+              });
+            }
+            idict[i] = val;
           }
           file.write((const char*) idict, sizeof(int64_t) * len);
           UNPROTECT(1);
@@ -2664,12 +2732,54 @@ void RParquetOutFile::write_dictionary(
           file.write((const char*) idict, sizeof(int64_t) * len);
           UNPROTECT(1);
         } else {
-          SEXP dict = PROTECT(Rf_allocVector(REALSXP, len));
-          int64_t *idict = (int64_t*) REAL(dict);
-          for (auto i = 0; i < len; i++) {
-            idict[i] = icol[iidx[i]];
+          bool is_signed = TRUE;
+          if (sel.__isset.logicalType && sel.logicalType.__isset.INTEGER) {
+            is_signed = sel.logicalType.INTEGER.isSigned;
           }
-          file.write((const char*) idict, sizeof(int64_t) * len);
+          SEXP dict = PROTECT(Rf_allocVector(REALSXP, len));
+          if (is_signed) {
+            // smallest & largest double that can be put into an int64_t
+            double min = -9223372036854774272.0, max = 9223372036854774272.0;
+            int64_t *idict = (int64_t*) REAL(dict);
+            for (auto i = 0; i < len; i++) {
+              double val = icol[iidx[i]];
+              const char *w = val <= min ? "small" : (val >= max ? "large" : "");
+              if (w[0]) {
+                r_call([&] {
+                  Rf_errorcall(
+                      nanoparquet_call,
+                      "Integer value too %s for INT with bit width 64: %f"
+                      " at column %u.", w, val, idx + 1);
+                });
+              }
+              idict[i] = val;
+            }
+          } else {
+            // largest double that can be put into an uint64_t
+            double max = 18446744073709550592.0;
+            uint64_t *idict = (uint64_t*) REAL(dict);
+            for (auto i = 0; i < len; i++) {
+              double val = icol[iidx[i]];
+              if (val >= max) {
+                r_call([&] {
+                  Rf_errorcall(
+                      nanoparquet_call,
+                      "Integer value too large for unsigned INT with bit width "
+                      "64: %f at column %u.", val, idx + 1);
+                });
+              }
+              if (val < 0) {
+                r_call([&] {
+                  Rf_errorcall(
+                      nanoparquet_call,
+                      "Negative values are not allowed in unsigned INT column: "
+                      "%f at column %u.", val, idx + 1);
+                });
+              }
+              idict[i] = val;
+            }
+          }
+          file.write((const char*) REAL(dict), sizeof(int64_t) * len);
           UNPROTECT(1);
         }
         break;

@@ -163,7 +163,8 @@ private:
                           uint64_t from, uint64_t until,
                           parquet::SchemaElement &sel);
   void write_integer_int64(std::ostream &file, SEXP col, uint32_t idx,
-                           uint64_t from, uint64_t until);
+                           uint64_t from, uint64_t until,
+                           parquet::SchemaElement &sel);
   void write_double_int64(std::ostream &file, SEXP col, uint32_t idx,
                           uint64_t from, uint64_t until,
                           parquet::SchemaElement &sel);

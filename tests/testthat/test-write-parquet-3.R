@@ -593,6 +593,71 @@ test_that("double to INT(64, *)", {
   })
 })
 
+test_that("integers that do not fit the column type error with any encoding", {
+  tmp <- tempfile(fileext = ".parquet")
+  on.exit(unlink(tmp), add = TRUE)
+
+  d <- data.frame(d = c(0:5, NA))
+  for (type in c("INT_8", "UINT_32", "UINT_64")) {
+    for (encoding in c("PLAIN", "RLE_DICTIONARY")) {
+      write_parquet(d, tmp, schema = parquet_schema(type), encoding = encoding)
+      expect_equal(as.integer(read_parquet(tmp)$d), d$d)
+    }
+  }
+
+  d <- data.frame(d = c(0L, -1L))
+  expect_snapshot(error = TRUE, {
+    write_parquet(d, tmp, schema = parquet_schema("UINT_32"))
+  })
+  expect_snapshot(error = TRUE, {
+    write_parquet(d, tmp, schema = parquet_schema("UINT_64"))
+  })
+  expect_snapshot(error = TRUE, {
+    write_parquet(
+      d,
+      tmp,
+      schema = parquet_schema("UINT_32"),
+      encoding = "RLE_DICTIONARY"
+    )
+  })
+  expect_snapshot(error = TRUE, {
+    write_parquet(
+      d,
+      tmp,
+      schema = parquet_schema("UINT_64"),
+      encoding = "RLE_DICTIONARY"
+    )
+  })
+  d <- data.frame(d = 127:128)
+  expect_snapshot(error = TRUE, {
+    write_parquet(
+      d,
+      tmp,
+      schema = parquet_schema("INT_8"),
+      encoding = "RLE_DICTIONARY"
+    )
+  })
+
+  d <- data.frame(d = c(0, -1))
+  expect_snapshot(error = TRUE, {
+    write_parquet(
+      d,
+      tmp,
+      schema = parquet_schema("UINT_64"),
+      encoding = "RLE_DICTIONARY"
+    )
+  })
+  d <- data.frame(d = c(0, 1e19))
+  expect_snapshot(error = TRUE, {
+    write_parquet(
+      d,
+      tmp,
+      schema = parquet_schema("INT_64"),
+      encoding = "RLE_DICTIONARY"
+    )
+  })
+})
+
 test_that("integer64 round-trip and read_int64_type option", {
   tmp <- tempfile(fileext = ".parquet")
   on.exit(unlink(tmp), add = TRUE)

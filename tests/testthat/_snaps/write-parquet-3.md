@@ -1631,6 +1631,62 @@
       Error in `write_parquet()`:
       ! Negative values are not allowed in unsigned INT column:-1.000000 at column 1, row 2.
 
+# integers that do not fit the column type error with any encoding
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("UINT_32"))
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too small for UINT with bit width 32: -1 at column 1, row 2:
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("UINT_64"))
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too small for UINT with bit width 64: -1 at column 1, row 2.
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("UINT_32"), encoding = "RLE_DICTIONARY")
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too small for UINT with bit width 32: -1 at column 1.
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("UINT_64"), encoding = "RLE_DICTIONARY")
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too small for UINT with bit width 64: -1 at column 1.
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("INT_8"), encoding = "RLE_DICTIONARY")
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too large for INT with bit width 8: 128 at column 1.
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("UINT_64"), encoding = "RLE_DICTIONARY")
+    Condition
+      Error in `write_parquet()`:
+      ! Negative values are not allowed in unsigned INT column: -1.000000 at column 1.
+
+---
+
+    Code
+      write_parquet(d, tmp, schema = parquet_schema("INT_64"), encoding = "RLE_DICTIONARY")
+    Condition
+      Error in `write_parquet()`:
+      ! Integer value too large for INT with bit width 64: 10000000000000000000.000000 at column 1.
+
 # integer64 round-trip and read_int64_type option
 
     Code
